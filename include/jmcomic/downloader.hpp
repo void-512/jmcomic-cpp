@@ -6,7 +6,7 @@
 #include <memory>
 #include <thread>
 namespace jm {
-enum class TaskState { Queued, Discovering, Downloading, Completed, Failed, Cancelled };
+enum class TaskState { Queued, Discovering, Downloading, Pausing, Paused, Completed, Failed, Cancelled };
 std::string state_name(TaskState);
 struct Progress {
   std::uint64_t task{};
@@ -22,13 +22,17 @@ class DownloadManager {
   ~DownloadManager();
   std::uint64_t enqueue(std::shared_ptr<Client>, const Comic&, const ChapterInfo&, fs::path destination);
   std::vector<Progress> snapshot() const;
+  void pause(std::uint64_t);
+  void pause_all();
+  void resume(std::uint64_t, std::shared_ptr<Client> client = {});
+  void resume_all(std::shared_ptr<Client> client = {});
   void cancel(std::uint64_t);
   void cancel_all();
-  void retry(std::uint64_t, std::shared_ptr<Client> client = {});
   void shutdown();
  private:
   struct Task;
   struct Job;
+  void resume_task(std::shared_ptr<Task>&, const std::shared_ptr<Client>&);
   void run(std::stop_token, int worker);
   void discover(const std::shared_ptr<Task>&);
   void page(const Job&);

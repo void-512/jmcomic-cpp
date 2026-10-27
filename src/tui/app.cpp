@@ -96,12 +96,28 @@ class Application {
       }
     });
   }
+  std::uint64_t selected_queue_task() const {
+    if (queue_index_<0 || static_cast<std::size_t>(queue_index_)>=progress_.size()) return 0;
+    return progress_[static_cast<std::size_t>(queue_index_)].task;
+  }
+  void resume_downloads(bool all) {
+    if (busy_) {status_="Wait for the current operation";return;}
+    try {
+      if (all) downloads_.resume_all(client_);
+      else if (const auto id=selected_queue_task()) downloads_.resume(id,client_);
+    } catch (const std::exception& e) {status_=display_text(e.what());}
+    drain();
+  }
   void drain() {
     std::deque<Update> updates;
     { std::lock_guard lock(updates_mutex_); updates.swap(updates_); }
     for (auto& update:updates) update();
+    const auto selected=selected_queue_task();
     progress_=downloads_.snapshot(); queue_labels_.clear();
-    for (const auto& p:progress_) queue_labels_.push_back(display_text(p.comic+" / "+p.chapter)+" — "+state_name(p.state)+" "+std::to_string(p.done)+"/"+std::to_string(p.total));
+    for (const auto& p:progress_) queue_labels_.push_back(display_text(p.comic+" / "+p.chapter)+" — "+std::to_string(p.done)+"/"+std::to_string(p.total)+
+      (p.state==TaskState::Completed ? "" : " · "+state_name(p.state)));
+    const auto current=std::find_if(progress_.begin(),progress_.end(),[&](const auto& p){return p.task==selected;});
+    if (current!=progress_.end()) queue_index_=static_cast<int>(current-progress_.begin());
     queue_index_=std::clamp(queue_index_,0,std::max(0,static_cast<int>(progress_.size())-1));
   }
   void show_comic(Comic comic) {
@@ -168,7 +184,7 @@ class Application {
   }
   void apply_settings() {
     const auto progress=downloads_.snapshot();
-    if (std::any_of(progress.begin(),progress.end(),[](const auto& p){return p.state==TaskState::Queued || p.state==TaskState::Discovering || p.state==TaskState::Downloading;})) {
+    if (std::any_of(progress.begin(),progress.end(),[](const auto& p){return p.state==TaskState::Queued || p.state==TaskState::Discovering || p.state==TaskState::Downloading || p.state==TaskState::Pausing;})) {
       status_="Wait for downloads to stop before applying network settings"; return;
     }
     Settings s;
@@ -242,12 +258,27 @@ class Application {
     auto account_controls=Container::Vertical({username,password,Container::Horizontal({login,logout,check})});
     auto account=Renderer(account_controls,[=,this]{return vbox({text(user_.empty()?"Guest / session not checked":"Signed in: "+display_text(user_)),separator(),username->Render(),password->Render(),
       hbox({login->Render(),logout->Render(),check->Render()}),separator(),paragraph("Session cookies are saved beside the executable with owner-only permissions on Linux. Passwords are used only for login and are never saved."),filler()});});
-    auto queue=Menu(&queue_labels_,&queue_index_);
-    auto queue_frame=Renderer(queue,[queue]{return queue->Render()|vscroll_indicator|frame|flex;});
-    auto cancel=Button("Cancel selected",[this]{if(!progress_.empty()) downloads_.cancel(progress_[static_cast<std::size_t>(queue_index_)].task);});
-    auto retry=Button("Retry / resume",[this]{try{if(busy_){status_="Wait for the current operation";return;}if(!progress_.empty()) downloads_.retry(progress_[static_cast<std::size_t>(queue_index_)].task,client_);}catch(const std::exception& e){status_=e.what();}});
-    auto cancel_all=Button("Cancel all",[this]{downloads_.cancel_all();});
-    auto queue_controls=Container::Vertical({queue_frame,Container::Horizontal({cancel,retry,cancel_all})});
+    MenuOption queue_options;
+    queue_options.entries_option.transform=[this](const EntryState& entry) {
+      const auto index=static_cast<std::size_t>(entry.index);
+      const bool finished=entry.index>=0 && index<progress_.size() && progress_[index].state==TaskState::Completed;
+      auto row=hbox({text(entry.active ? "> " : "  "),text(entry.label)|xflex,
+        text(finished ? "  ✓ Finished" : "")|color(Color::Green)|bold});
+      if (entry.focused) row|=inverted;
+      else if (entry.active) row|=bold;
+      return row;
+    };
+    auto queue=Menu(&queue_labels_,&queue_index_,queue_options);
+    auto queue_frame=Renderer(queue,[queue]{return queue->Render()|vscroll_indicator|yframe|flex;});
+    auto pause=Button("Pause selected",[this]{if(const auto id=selected_queue_task()) downloads_.pause(id);drain();});
+    auto pause_all=Button("Pause all",[this]{downloads_.pause_all();drain();});
+    auto resume=Button("Resume selected",[this]{resume_downloads(false);});
+    auto resume_all=Button("Resume all",[this]{resume_downloads(true);});
+    auto cancel=Button("Cancel selected",[this]{if(const auto id=selected_queue_task()) downloads_.cancel(id);drain();});
+    auto cancel_all=Button("Cancel all",[this]{downloads_.cancel_all();drain();});
+    auto pause_resume=Container::Horizontal({pause,pause_all,resume,resume_all});
+    auto cancellations=Container::Horizontal({cancel,cancel_all});
+    auto queue_controls=Container::Vertical({queue_frame,pause_resume,cancellations});
     auto queue_pane=Renderer(queue_controls,[=,this] {
       Elements content; std::size_t done{},total{}; std::size_t complete{};
       for(const auto& p:progress_) {done+=p.done;total+=p.total;if(p.state==TaskState::Completed)++complete;}
@@ -260,7 +291,7 @@ class Application {
         content.push_back(gauge(p.total ? static_cast<float>(p.done)/static_cast<float>(p.total) : 0));
         content.push_back(paragraph(display_text(p.error)));
       }
-      content.push_back(separator());content.push_back(hbox({cancel->Render(),retry->Render(),cancel_all->Render()}));return vbox(std::move(content));
+      content.push_back(separator());content.push_back(pause_resume->Render());content.push_back(cancellations->Render());return vbox(std::move(content));
     });
     auto api=Input(&api_url_,"HTTPS API origin"); auto images=Input(&image_url_,"HTTPS image origin");
     auto workers=Input(&concurrency_,"1–8"); auto timeout=Input(&timeout_,"5–180 seconds");

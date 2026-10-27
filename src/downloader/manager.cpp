@@ -11,6 +11,8 @@ struct DownloadManager::Task {
   fs::path directory;
   std::stop_source cancel;
   std::size_t finished{};
+  std::size_t active{};
+  bool paused = false;
 };
 struct DownloadManager::Job { std::shared_ptr<Task> task; std::size_t index{}; bool discover=false; };
 std::string state_name(TaskState s) {
@@ -18,6 +20,8 @@ std::string state_name(TaskState s) {
     case TaskState::Queued: return "Queued";
     case TaskState::Discovering: return "Loading pages";
     case TaskState::Downloading: return "Downloading";
+    case TaskState::Pausing: return "Pausing";
+    case TaskState::Paused: return "Paused";
     case TaskState::Completed: return "Completed";
     case TaskState::Failed: return "Failed";
     case TaskState::Cancelled: return "Cancelled";
@@ -39,8 +43,10 @@ std::uint64_t DownloadManager::enqueue(std::shared_ptr<Client> client, const Com
     if (stopping_) throw std::runtime_error("Downloader is shutting down");
     // Never allow two workers to write the same output directory concurrently.
     for (const auto& t:tasks_) if (t->directory==directory) {
-      if (t->progress.state==TaskState::Failed || t->progress.state==TaskState::Cancelled)
-        throw std::runtime_error("This chapter is already in the queue; select Retry / resume there");
+      if (t->progress.state==TaskState::Cancelled)
+        throw std::runtime_error("This chapter is still stopping; queue it again shortly");
+      if (t->progress.state==TaskState::Failed)
+        throw std::runtime_error("This chapter is already in the queue; select Resume selected there");
       return t->progress.task;
     }
     auto t=std::make_shared<Task>(); id=next_task_++;
@@ -52,39 +58,98 @@ std::uint64_t DownloadManager::enqueue(std::shared_ptr<Client> client, const Com
 }
 std::vector<Progress> DownloadManager::snapshot() const {
   std::lock_guard lock(mutex_); std::vector<Progress> out;
-  for (const auto& task:tasks_) out.push_back(task->progress);
+  for (const auto& task:tasks_) {
+    if (task->progress.state==TaskState::Cancelled) continue;
+    auto progress=task->progress;
+    if (task->paused && (progress.state==TaskState::Queued || progress.state==TaskState::Discovering || progress.state==TaskState::Downloading))
+      progress.state=task->active ? TaskState::Pausing : TaskState::Paused;
+    out.push_back(std::move(progress));
+  }
   return out;
+}
+void DownloadManager::pause(std::uint64_t id) {
+  {
+    std::lock_guard lock(mutex_);
+    for (const auto& t:tasks_) if (t->progress.task==id) {
+      const auto state=t->progress.state;
+      if (state==TaskState::Queued || state==TaskState::Discovering || state==TaskState::Downloading) t->paused=true;
+      break;
+    }
+  }
+  changed();
+}
+void DownloadManager::pause_all() {
+  {
+    std::lock_guard lock(mutex_);
+    for (const auto& t:tasks_) {
+      const auto state=t->progress.state;
+      if (state==TaskState::Queued || state==TaskState::Discovering || state==TaskState::Downloading) t->paused=true;
+    }
+  }
+  changed();
+}
+void DownloadManager::resume_task(std::shared_ptr<Task>& t, const std::shared_ptr<Client>& client) {
+  if (t->progress.state==TaskState::Failed) {
+    // Failed tasks have finished their writes; obsolete jobs keep their old object.
+    const auto previous=t;
+    previous->cancel.request_stop();
+    std::erase_if(jobs_,[&](const Job& job){return job.task==previous;});
+    auto replacement=std::make_shared<Task>();
+    replacement->progress.task=t->progress.task; replacement->progress.comic=t->comic.name;
+    replacement->progress.chapter=t->chapter.name; replacement->progress.chapter_id=t->chapter.id;
+    replacement->client=client ? client : t->client; replacement->comic=t->comic; replacement->chapter=t->chapter;
+    replacement->directory=t->directory; t=replacement;
+    jobs_.push_back({t,0,true});
+  } else if (t->paused && t->progress.state!=TaskState::Completed && t->progress.state!=TaskState::Cancelled) {
+    if (client && client!=t->client) {
+      if (t->active) throw std::runtime_error("Wait for this task to finish pausing before changing its network settings");
+      t->client=client;
+    }
+    t->paused=false;
+  }
+}
+void DownloadManager::resume(std::uint64_t id, std::shared_ptr<Client> client) {
+  {
+    std::lock_guard lock(mutex_);
+    if (stopping_) throw std::runtime_error("Downloader is shutting down");
+    for (auto& t:tasks_) if (t->progress.task==id) { resume_task(t,client); break; }
+  }
+  ready_.notify_all(); changed();
+}
+void DownloadManager::resume_all(std::shared_ptr<Client> client) {
+  {
+    std::lock_guard lock(mutex_);
+    if (stopping_) throw std::runtime_error("Downloader is shutting down");
+    for (const auto& t:tasks_)
+      if (t->paused && t->active && client && client!=t->client &&
+          (t->progress.state==TaskState::Queued || t->progress.state==TaskState::Discovering || t->progress.state==TaskState::Downloading))
+        throw std::runtime_error("Wait for tasks to finish pausing before changing their network settings");
+    for (auto& t:tasks_) resume_task(t,client);
+  }
+  ready_.notify_all(); changed();
 }
 void DownloadManager::cancel(std::uint64_t id) {
   {
     std::lock_guard lock(mutex_);
-    for (auto& t:tasks_) if (t->progress.task==id && t->progress.state!=TaskState::Completed) {
+    for (const auto& t:tasks_) if (t->progress.task==id) {
       t->cancel.request_stop();
-      // Marked cancelled after in-flight operations have stopped, so retry cannot race them.
-      if (t->progress.state==TaskState::Queued || t->progress.state==TaskState::Failed) t->progress.state=TaskState::Cancelled;
+      t->progress.state=TaskState::Cancelled;
+      std::erase_if(jobs_,[&](const Job& job){return job.task==t;});
+      break;
     }
+    std::erase_if(tasks_,[](const auto& t){return t->progress.state==TaskState::Cancelled && t->active==0;});
   }
   ready_.notify_all(); changed();
 }
 void DownloadManager::cancel_all() {
-  for (const auto& p:snapshot()) cancel(p.task);
-}
-void DownloadManager::retry(std::uint64_t id, std::shared_ptr<Client> client) {
   {
     std::lock_guard lock(mutex_);
-    if (stopping_) throw std::runtime_error("Downloader is shutting down");
-    for (auto& t:tasks_) if (t->progress.task==id) {
-      if (t->progress.state!=TaskState::Failed && t->progress.state!=TaskState::Cancelled)
-        throw std::runtime_error("Retry is available after a task has stopped");
-      // Replace the task object: obsolete queued jobs keep their cancelled object.
+    for (const auto& t:tasks_) {
       t->cancel.request_stop();
-      auto replacement=std::make_shared<Task>();
-      replacement->progress.task=t->progress.task; replacement->progress.comic=t->comic.name;
-      replacement->progress.chapter=t->chapter.name; replacement->progress.chapter_id=t->chapter.id;
-      replacement->client=client ? client : t->client; replacement->comic=t->comic; replacement->chapter=t->chapter;
-      replacement->directory=t->directory; t=replacement;
-      jobs_.push_back({t,0,true}); break;
+      t->progress.state=TaskState::Cancelled;
     }
+    jobs_.clear();
+    std::erase_if(tasks_,[](const auto& t){return t->active==0;});
   }
   ready_.notify_all(); changed();
 }
@@ -103,13 +168,21 @@ void DownloadManager::run(std::stop_token stop, int worker) {
     Job job;
     {
       std::unique_lock lock(mutex_);
-      auto eligible=[&](const Job& j){ return worker<j.task->client->settings().concurrency; };
+      auto eligible=[&](const Job& j){ return !j.task->paused && !j.task->cancel.stop_requested() && worker<j.task->client->settings().concurrency; };
       ready_.wait(lock,stop,[&]{ return stopping_ || std::any_of(jobs_.begin(),jobs_.end(),eligible); });
       if (stopping_ || stop.stop_requested()) return;
       const auto it=std::find_if(jobs_.begin(),jobs_.end(),eligible);
       job=std::move(*it); jobs_.erase(it);
+      ++job.task->active;
     }
     if (job.discover) discover(job.task); else page(job);
+    {
+      std::lock_guard lock(mutex_);
+      --job.task->active;
+      if (job.task->progress.state==TaskState::Cancelled && job.task->active==0)
+        std::erase_if(tasks_,[&](const auto& task){return task==job.task;});
+    }
+    ready_.notify_all(); changed();
   }
 }
 void DownloadManager::discover(const std::shared_ptr<Task>& t) {
@@ -125,6 +198,7 @@ void DownloadManager::discover(const std::shared_ptr<Task>& t) {
     fs::create_directories(t->directory);
     {
       std::lock_guard lock(mutex_);
+      if (t->cancel.stop_requested()) return;
       t->data=std::move(data); t->progress.total=t->data.images.size(); t->progress.state=TaskState::Downloading;
       for (std::size_t i=0;i<t->data.images.size();++i) jobs_.push_back({t,i,false});
     }
@@ -134,7 +208,6 @@ void DownloadManager::discover(const std::shared_ptr<Task>& t) {
     t->progress.state=t->cancel.stop_requested() ? TaskState::Cancelled : TaskState::Failed;
     t->progress.error=e.what();
   }
-  changed();
 }
 void DownloadManager::page(const Job& job) {
   const auto& t=job.task;
@@ -178,11 +251,9 @@ void DownloadManager::page(const Job& job) {
     ++t->finished;
     if (success) { ++t->progress.done; if (skipped) ++t->progress.skipped; }
     else if (!t->cancel.stop_requested()) { ++t->progress.failed; t->progress.error=error; }
-    if (t->finished==t->progress.total) {
-      t->progress.state=t->cancel.stop_requested() ? TaskState::Cancelled :
-        (t->progress.failed ? TaskState::Failed : TaskState::Completed);
+    if (t->finished==t->progress.total && !t->cancel.stop_requested()) {
+      t->progress.state=t->progress.failed ? TaskState::Failed : TaskState::Completed;
     }
   }
-  changed();
 }
 }

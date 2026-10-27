@@ -24,8 +24,9 @@ mkdir build && cd build
 - **Account:** enter credentials to log in; the password field is masked and cleared on submission. Passwords are not saved. A saved cookie session is
   checked at startup; Log out removes it. Favorites on Search loads the list; choose a folder and Load folder to filter it. Open a favorite like any result.
 - **Chapters:** read comic metadata, select individual/multiple/all chapters, edit the destination, and Queue selected chapters.
-- **Queue:** monitor chapter and overall page counts and progress bars. Cancel selected / Cancel all stop requests. Retry / resume verifies saved pages and
-  downloads missing or damaged ones. After restarting, find the comic and queue the same chapters and destination to resume them.
+- **Queue:** Pause selected / Pause all stop new page work while in-flight pages finish. Resume selected / Resume all continue paused tasks and retry failed
+  ones. Cancel selected / Cancel all stop tasks and remove them from the queue, keeping downloaded pages. Completed tasks show a green ✓ Finished label
+  on the right. After restarting, find the comic and queue the same chapters and destination to resume them.
 - **Settings:** edit concurrency (1–8), timeout, retry count, request spacing, API and image origins, optional HTTP(S)/SOCKS proxy, and destination. Apply
   after active downloads stop. Retries use the current applied network settings. Empty proxy means a direct connection; no proxy environment setup is needed.
 
