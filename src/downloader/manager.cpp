@@ -13,8 +13,16 @@ struct DownloadManager::Task {
   std::size_t finished{};
   std::size_t active{};
   bool paused = false;
+  bool remove_directory = false;
 };
-struct DownloadManager::Job { std::shared_ptr<Task> task; std::size_t index{}; bool discover=false; };
+struct DownloadManager::Job {
+  std::shared_ptr<Task> task;
+  std::size_t index{};
+  bool discover=false;
+  Bytes bytes{};
+  int attempt{};
+  std::chrono::seconds delay{};
+};
 std::string state_name(TaskState s) {
   switch (s) {
     case TaskState::Queued: return "Queued";
@@ -29,7 +37,9 @@ std::string state_name(TaskState s) {
   return {};
 }
 DownloadManager::DownloadManager(Notify notify) : notify_(std::move(notify)) {
-  for (int i=0;i<8;++i) workers_.emplace_back([this,i](std::stop_token stop){run(stop,i);});
+  for (int i=0;i<8;++i) workers_.emplace_back([this,i](std::stop_token stop){run(stop,i,false);});
+  const auto count=std::clamp(std::thread::hardware_concurrency(),1U,8U);
+  for (unsigned i=0;i<count;++i) processors_.emplace_back([this,i](std::stop_token stop){run(stop,static_cast<int>(i),true);});
 }
 DownloadManager::~DownloadManager() { shutdown(); }
 void DownloadManager::changed() { if (notify_) notify_(); }
@@ -89,6 +99,11 @@ void DownloadManager::pause_all() {
   changed();
 }
 void DownloadManager::resume_task(std::shared_ptr<Task>& t, const std::shared_ptr<Client>& client) {
+  if (t->remove_directory) {
+    if (t->progress.state==TaskState::Failed)
+      throw std::runtime_error("Folder removal failed; use Cancel selected to retry");
+    return;
+  }
   if (t->progress.state==TaskState::Failed) {
     // Failed tasks have finished their writes; obsolete jobs keep their old object.
     const auto previous=t;
@@ -128,60 +143,105 @@ void DownloadManager::resume_all(std::shared_ptr<Client> client) {
   }
   ready_.notify_all(); changed();
 }
+bool DownloadManager::cancel_task(const std::shared_ptr<Task>& t) {
+  t->remove_directory=true;
+  t->cancel.request_stop();
+  t->progress.state=TaskState::Cancelled;
+  std::erase_if(jobs_,[&](const Job& job){return job.task==t;});
+  std::erase_if(processing_jobs_,[&](const Job& job){
+    if (job.task!=t) return false;
+    buffered_bytes_-=job.bytes.size();
+    --t->active;
+    return true;
+  });
+  if (t->active) return false;
+  // Reserve the directory until removal finishes, including against re-enqueue.
+  ++t->active;
+  return true;
+}
+void DownloadManager::remove_cancelled(const std::shared_ptr<Task>& t) {
+  std::error_code error;
+  fs::remove_all(t->directory,error);
+  std::lock_guard lock(mutex_);
+  --t->active;
+  if (error) {
+    t->progress.state=TaskState::Failed;
+    t->progress.error="Cannot remove cancelled task folder: "+error.message()+"; cancel again to retry";
+  } else {
+    std::erase(tasks_,t);
+  }
+}
 void DownloadManager::cancel(std::uint64_t id) {
+  std::shared_ptr<Task> remove;
   {
     std::lock_guard lock(mutex_);
     for (const auto& t:tasks_) if (t->progress.task==id) {
-      t->cancel.request_stop();
-      t->progress.state=TaskState::Cancelled;
-      std::erase_if(jobs_,[&](const Job& job){return job.task==t;});
+      if (cancel_task(t)) remove=t;
       break;
     }
-    std::erase_if(tasks_,[](const auto& t){return t->progress.state==TaskState::Cancelled && t->active==0;});
   }
+  if (remove) remove_cancelled(remove);
   ready_.notify_all(); changed();
 }
 void DownloadManager::cancel_all() {
+  std::vector<std::shared_ptr<Task>> remove;
   {
     std::lock_guard lock(mutex_);
-    for (const auto& t:tasks_) {
-      t->cancel.request_stop();
-      t->progress.state=TaskState::Cancelled;
-    }
-    jobs_.clear();
-    std::erase_if(tasks_,[](const auto& t){return t->active==0;});
+    for (const auto& t:tasks_) if (cancel_task(t)) remove.push_back(t);
   }
+  for (const auto& t:remove) remove_cancelled(t);
   ready_.notify_all(); changed();
 }
 void DownloadManager::shutdown() {
+  std::vector<std::shared_ptr<Task>> remove;
   {
     std::lock_guard lock(mutex_);
     if (stopping_) return;
     stopping_=true;
     for (auto& t:tasks_) t->cancel.request_stop();
+    for (const auto& job:processing_jobs_) --job.task->active;
+    processing_jobs_.clear(); buffered_bytes_=0;
+    for (const auto& t:tasks_) if (t->remove_directory && t->active==0) {
+      ++t->active; remove.push_back(t);
+    }
     for (auto& worker:workers_) worker.request_stop();
+    for (auto& processor:processors_) processor.request_stop();
   }
-  ready_.notify_all(); workers_.clear();
+  ready_.notify_all(); workers_.clear(); processors_.clear();
+  for (const auto& t:remove) remove_cancelled(t);
 }
-void DownloadManager::run(std::stop_token stop, int worker) {
+void DownloadManager::run(std::stop_token stop, int worker, bool processing) {
   while (!stop.stop_requested()) {
     Job job;
     {
       std::unique_lock lock(mutex_);
-      auto eligible=[&](const Job& j){ return !j.task->paused && !j.task->cancel.stop_requested() && worker<j.task->client->settings().concurrency; };
-      ready_.wait(lock,stop,[&]{ return stopping_ || std::any_of(jobs_.begin(),jobs_.end(),eligible); });
+      auto& queue=processing ? processing_jobs_ : jobs_;
+      auto eligible=[&](const Job& j){
+        if (j.task->cancel.stop_requested() || worker>=j.task->client->settings().concurrency) return false;
+        if (processing) return true; // Finish pages already in flight when paused.
+        return !j.task->paused && (j.discover || (processing_jobs_.size()<8 && buffered_bytes_<64*1024*1024));
+      };
+      ready_.wait(lock,stop,[&]{ return stopping_ || std::any_of(queue.begin(),queue.end(),eligible); });
       if (stopping_ || stop.stop_requested()) return;
-      const auto it=std::find_if(jobs_.begin(),jobs_.end(),eligible);
-      job=std::move(*it); jobs_.erase(it);
-      ++job.task->active;
+      const auto it=std::find_if(queue.begin(),queue.end(),eligible);
+      job=std::move(*it); queue.erase(it);
+      if (processing) buffered_bytes_-=job.bytes.size();
+      else ++job.task->active;
     }
-    if (job.discover) discover(job.task); else page(job);
+    ready_.notify_all();
+    const auto task=job.task;
+    bool handed_off=false;
+    if (job.discover) discover(task); else handed_off=page(std::move(job),processing);
+    bool remove=false;
     {
       std::lock_guard lock(mutex_);
-      --job.task->active;
-      if (job.task->progress.state==TaskState::Cancelled && job.task->active==0)
-        std::erase_if(tasks_,[&](const auto& task){return task==job.task;});
+      if (!handed_off) --task->active;
+      if (!handed_off && task->remove_directory && task->active==0) {
+        ++task->active;
+        remove=true;
+      }
     }
+    if (remove) remove_cancelled(task);
     ready_.notify_all(); changed();
   }
 }
@@ -209,7 +269,7 @@ void DownloadManager::discover(const std::shared_ptr<Task>& t) {
     t->progress.error=e.what();
   }
 }
-void DownloadManager::page(const Job& job) {
+bool DownloadManager::page(Job job, bool processing) {
   const auto& t=job.task;
   bool skipped=false, success=false;
   std::string error;
@@ -222,26 +282,48 @@ void DownloadManager::page(const Job& job) {
     const auto strips=extension==".gif" ? 0U : strip_count(t->data.scramble_id,t->chapter.id,fs::path(filename).stem().string());
     const Json identity={{"chapter_id",t->chapter.id},{"filename",filename},{"strips",strips},{"decoder",1}};
     const auto output=t->directory/page_name(job.index);
-    skipped=verified_page(output,identity);
+    if (job.delay.count()) { Http::wait(stop,job.delay); job.delay={}; }
+    skipped=!processing && verified_page(output,identity);
     if (!skipped) {
-      for (int attempt=0;;++attempt) {
+      for (;;) {
+        std::chrono::seconds delay{};
         try {
-          auto bytes=t->client->image(t->chapter.id,filename,stop);
+          if (!processing) {
+            job.bytes=t->client->image(t->chapter.id,filename,stop);
+            std::lock_guard lock(mutex_);
+            if (stop.stop_requested() || stopping_) throw Cancelled();
+            const auto size=job.bytes.size();
+            processing_jobs_.push_back(std::move(job));
+            buffered_bytes_+=size;
+            ready_.notify_all();
+            return true; // Keep this page active until processing finishes.
+          }
           if (stop.stop_requested()) throw Cancelled();
-          auto image=decode_image(bytes); bytes.clear(); bytes.shrink_to_fit();
+          auto image=decode_image(job.bytes); Bytes{}.swap(job.bytes);
           unscramble(image,strips);
           if (stop.stop_requested()) throw Cancelled();
           save_page(output,image,identity); break;
         } catch (const Cancelled&) { throw; }
         catch (const HttpError& e) {
-          if (!e.transient || attempt>=t->client->settings().retries || e.retry_after>60) throw;
-          Http::wait(stop,std::chrono::seconds(std::max(e.retry_after,1<<attempt)));
+          if (!e.transient || job.attempt>=t->client->settings().retries || e.retry_after>60) throw;
+          delay=std::chrono::seconds(std::max(e.retry_after,1<<job.attempt));
         } catch (const fs::filesystem_error&) { throw; }
         catch (const std::system_error&) { throw; }
         catch (const std::exception&) {
-          if (attempt>=t->client->settings().retries) throw;
-          Http::wait(stop,std::chrono::seconds(1<<attempt));
+          if (job.attempt>=t->client->settings().retries) throw;
+          delay=std::chrono::seconds(1<<job.attempt);
         }
+        ++job.attempt;
+        if (processing) {
+          // Retry incomplete/corrupt images on the network pool, freeing the CPU worker.
+          Bytes{}.swap(job.bytes); job.delay=delay;
+          std::lock_guard lock(mutex_);
+          if (stop.stop_requested() || stopping_) throw Cancelled();
+          jobs_.push_back(std::move(job));
+          ready_.notify_all();
+          return false;
+        }
+        Http::wait(stop,delay);
       }
     }
     success=true;
@@ -255,5 +337,6 @@ void DownloadManager::page(const Job& job) {
       t->progress.state=t->progress.failed ? TaskState::Failed : TaskState::Completed;
     }
   }
+  return false;
 }
 }

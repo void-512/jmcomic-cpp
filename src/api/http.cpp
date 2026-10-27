@@ -64,13 +64,23 @@ void Http::wait(std::stop_token stop, std::chrono::milliseconds duration) {
   if (stop.stop_requested()) throw Cancelled();
 }
 HttpResponse Http::perform(const HttpRequest& req, std::stop_token stop) {
-  { // One client-wide request gate bounds the API and image request rate together.
+  { // Pace each image slot independently; server cooldowns apply to every request.
     std::unique_lock lock(rate_mutex_);
-    const auto remaining=std::chrono::duration_cast<std::chrono::seconds>(next_request_-std::chrono::steady_clock::now());
-    if (remaining>std::chrono::seconds(60))
-      throw HttpError("Service rate limit is still active; retry later",429,static_cast<int>(remaining.count())+1,false);
-    Http::wait(stop, std::max(std::chrono::milliseconds(0),std::chrono::duration_cast<std::chrono::milliseconds>(next_request_-std::chrono::steady_clock::now())));
-    next_request_ = std::chrono::steady_clock::now()+std::chrono::milliseconds(settings_.request_interval_ms);
+    for (;;) {
+      if (stop.stop_requested()) throw Cancelled();
+      const auto now=std::chrono::steady_clock::now();
+      const auto remaining=std::chrono::duration_cast<std::chrono::seconds>(cooldown_-now);
+      if (remaining>std::chrono::seconds(60))
+        throw HttpError("Service rate limit is still active; retry later",429,static_cast<int>(remaining.count())+1,false);
+      auto* next=&next_request_;
+      if (req.image) next=&*std::min_element(next_image_requests_.begin(),next_image_requests_.begin()+settings_.concurrency);
+      const auto at=std::max(*next,cooldown_);
+      if (now>=at) {
+        *next=now+std::chrono::milliseconds(settings_.request_interval_ms);
+        break;
+      }
+      rate_ready_.wait_until(lock,stop,at,[]{return false;});
+    }
   }
   // A per-thread easy handle retains connection and DNS caches between pages.
   thread_local std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> easy(curl_easy_init(),curl_easy_cleanup);
@@ -120,7 +130,8 @@ HttpResponse Http::perform(const HttpRequest& req, std::stop_token stop) {
   if (status != 200) {
     if (status==429 || t.retry_after>0) {
       std::lock_guard lock(rate_mutex_);
-      next_request_=std::max(next_request_,std::chrono::steady_clock::now()+std::chrono::seconds(std::max(1,t.retry_after)));
+      cooldown_=std::max(cooldown_,std::chrono::steady_clock::now()+std::chrono::seconds(std::max(1,t.retry_after)));
+      rate_ready_.notify_all();
     }
     std::string message = "HTTP " + std::to_string(status);
     if (status == 403) message += ": access denied or service challenge";

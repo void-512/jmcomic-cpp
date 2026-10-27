@@ -2,6 +2,8 @@
 #include "jmcomic/models.hpp"
 #include "jmcomic/crypto.hpp"
 #include <chrono>
+#include <array>
+#include <condition_variable>
 #include <mutex>
 #include <stop_token>
 namespace jm {
@@ -16,6 +18,7 @@ struct HttpError : std::runtime_error {
 struct HttpRequest {
   std::string url, form;
   bool post = false;
+  bool image = false;
   std::vector<std::string> headers, cookies;
   std::size_t limit = 64 * 1024 * 1024;
 };
@@ -29,6 +32,9 @@ class Http {
  private:
   Settings settings_;
   std::mutex rate_mutex_;
+  std::condition_variable_any rate_ready_;
   std::chrono::steady_clock::time_point next_request_{};
+  std::array<std::chrono::steady_clock::time_point,8> next_image_requests_{};
+  std::chrono::steady_clock::time_point cooldown_{};
 };
 }

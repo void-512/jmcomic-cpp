@@ -18,19 +18,21 @@ mkdir build && cd build
 ## Controls and workflow
 
 - **Tab / Shift-Tab** move focus, arrow keys navigate, **Enter** activates a button or opens a result, and **Space** toggles chapter checkboxes.
-- Use the top tabs to switch between **Search**, **Chapters**, **Account**, **Queue**, and **Settings**. **Ctrl-Q** or **Quit** cancels work and closes.
+- Use the top tabs to switch between **Search**, **Chapters**, **Account**, **Queue**, and **Settings**. **Ctrl-Q** or **Quit** stops work and closes, keeping downloaded pages.
 - **Search:** enter a keyword or comic ID and press Enter or Search. Choose Latest, Most clicks, or Most favorites. Previous/Next browse pages.
   Results show titles, IDs, and authors.
 - **Account:** enter credentials to log in; the password field is masked and cleared on submission. Passwords are not saved. A saved cookie session is
   checked at startup; Log out removes it. Favorites on Search loads the list; choose a folder and Load folder to filter it. Open a favorite like any result.
 - **Chapters:** read comic metadata, select individual/multiple/all chapters, edit the destination, and Queue selected chapters.
 - **Queue:** Pause selected / Pause all stop new page work while in-flight pages finish. Resume selected / Resume all continue paused tasks and retry failed
-  ones. Cancel selected / Cancel all stop tasks and remove them from the queue, keeping downloaded pages. Completed tasks show a green ✓ Finished label
+  ones. Cancel selected / Cancel all remove tasks from the queue and delete their chapter folders after active downloads stop. If deletion fails, the task
+  shows the error; cancel it again to retry. Completed tasks show a green ✓ Finished label
   on the right. After restarting, find the comic and queue the same chapters and destination to resume them.
-- **Settings:** edit concurrency (1–8), timeout, retry count, request spacing, API and image origins, optional HTTP(S)/SOCKS proxy, and destination. Apply
+- **Settings:** edit concurrency (1–8), timeout, retry count, request spacing per download slot, API and image origins, optional HTTP(S)/SOCKS proxy, and destination. Apply
   after active downloads stop. Retries use the current applied network settings. Empty proxy means a direct connection; no proxy environment setup is needed.
 
-Defaults are 4 download workers, a 30-second request timeout, 3 retries, and at least 250 ms between requests. Saved settings override these defaults.
+Defaults are 4 concurrent downloads, a 30-second request timeout, 3 retries, and at least 250 ms between requests per download slot; server cooldowns apply to both API and image requests. Downloading overlaps image processing through a bounded queue, with processing workers
+limited by concurrency and available CPU cores. Saved settings override these defaults.
 
 ## Output, correctness, and resource use
 

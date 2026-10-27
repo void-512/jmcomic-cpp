@@ -142,6 +142,7 @@ Bytes Client::image(Id chapter, const std::string& filename, std::stop_token sto
     throw std::runtime_error("Invalid image filename from API");
   HttpRequest request;
   request.url=http_.settings().image_url+"/media/photos/"+std::to_string(chapter)+"/"+Http::escape(filename);
+  request.image=true;
   auto response=http_.perform(request,stop);
   if (response.body.empty()) {
     request.url+="?ts="+std::to_string(std::time(nullptr));

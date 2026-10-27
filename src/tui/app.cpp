@@ -198,8 +198,8 @@ class Application {
     });
   }
   void quit() {
-    status_="Cancelling operations and closing…";
-    background_.cancel(); downloads_.cancel_all(); screen_.ExitLoopClosure()();
+    status_="Stopping operations and closing…";
+    background_.cancel(); screen_.ExitLoopClosure()();
   }
   void build() {
     InputOption search_option; search_option.on_enter=[this]{list(false,1,true);};
@@ -299,7 +299,7 @@ class Application {
     auto settings=Renderer(settings_controls,[=] {
       return vbox({text("API origin"),api->Render(),text("Image origin"),images->Render(),text("Download destination"),settings_destination->Render(),
         hbox({text("Parallel workers (1–8): "),workers->Render()|flex}),hbox({text("Request timeout in seconds: "),timeout->Render()|flex}),
-        hbox({text("Retries: "),retries->Render()|flex}),hbox({text("Minimum interval between requests, ms: "),interval->Render()|flex}),
+        hbox({text("Retries: "),retries->Render()|flex}),hbox({text("Request spacing per download slot, ms: "),interval->Render()|flex}),
         text("Proxy URL (optional; hidden)"),proxy->Render(),save->Render(),filler(),
         paragraph("Apply network settings after active downloads stop. Destination changes apply when queueing chapters. Settings and session files live beside the executable.")})|vscroll_indicator|frame;
     });
