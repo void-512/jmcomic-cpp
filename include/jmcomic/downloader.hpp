@@ -1,0 +1,45 @@
+#pragma once
+#include "jmcomic/client.hpp"
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <thread>
+namespace jm {
+enum class TaskState { Queued, Discovering, Downloading, Completed, Failed, Cancelled };
+std::string state_name(TaskState);
+struct Progress {
+  std::uint64_t task{};
+  std::string comic, chapter, error;
+  Id chapter_id{};
+  TaskState state = TaskState::Queued;
+  std::size_t done{}, total{}, failed{}, skipped{};
+};
+class DownloadManager {
+ public:
+  using Notify = std::function<void()>;
+  explicit DownloadManager(Notify);
+  ~DownloadManager();
+  std::uint64_t enqueue(std::shared_ptr<Client>, const Comic&, const ChapterInfo&, fs::path destination);
+  std::vector<Progress> snapshot() const;
+  void cancel(std::uint64_t);
+  void cancel_all();
+  void retry(std::uint64_t, std::shared_ptr<Client> client = {});
+  void shutdown();
+ private:
+  struct Task;
+  struct Job;
+  void run(std::stop_token, int worker);
+  void discover(const std::shared_ptr<Task>&);
+  void page(const Job&);
+  void changed();
+  Notify notify_;
+  mutable std::mutex mutex_;
+  std::condition_variable_any ready_;
+  std::deque<Job> jobs_;
+  std::vector<std::shared_ptr<Task>> tasks_;
+  std::vector<std::jthread> workers_;
+  std::uint64_t next_task_ = 1;
+  bool stopping_ = false;
+};
+}
