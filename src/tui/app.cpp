@@ -203,12 +203,9 @@ class Application {
   }
   void build() {
     InputOption search_option; search_option.on_enter=[this]{list(false,1,true);};
-    auto search=Input(&keyword_,"Keyword",search_option);
-    InputOption id_option; id_option.on_enter=[this]{ try {lookup(parse_id(id_));} catch(const std::exception& e){status_=e.what();} };
-    auto id=Input(&id_,"Comic ID",id_option);
+    auto search=Input(&keyword_,"Keyword or comic ID",search_option);
     auto sort=Toggle(&order_labels_,&order_);
     auto submit=Button("Search",[this]{list(false,1,true);});
-    auto by_id=Button("Get ID",id_option.on_enter);
     auto favorite=Button("Favorites",[this]{list(true,1,true);});
     auto previous=Button("Previous",[this]{list(favorites_view_,page_-1);});
     auto next=Button("Next",[this]{ if (!listing_.comics.empty()) list(favorites_view_,page_+1); });
@@ -219,11 +216,10 @@ class Application {
     auto results=Menu(&result_labels_,&result_index_,results_options);
     auto results_frame=Renderer(results,[results]{return results->Render()|vscroll_indicator|frame|flex;});
     auto open=Button("Open selected",[this]{open_result();});
-    auto search_controls=Container::Vertical({Container::Horizontal({search,submit}),sort,Container::Horizontal({id,by_id,favorite}),
+    auto search_controls=Container::Vertical({Container::Horizontal({search,submit,favorite}),sort,
       Container::Horizontal({folders,load_folder}),results_frame,Container::Horizontal({previous,next,open})});
     auto search_pane=Renderer(search_controls,[=,this] {
-      return vbox({hbox({text("Search: "),search->Render()|flex,submit->Render()}),sort->Render(),
-        hbox({text("Direct lookup: "),id->Render()|flex,by_id->Render(),favorite->Render()}),
+      return vbox({hbox({text("Search: "),search->Render()|flex,submit->Render(),favorite->Render()}),sort->Render(),
         hbox({folders->Render()|flex,load_folder->Render()}),separator(),
         text(std::string(favorites_view_?"Favorites":"Search results")+" · page "+std::to_string(page_)+" · "+std::to_string(listing_.total)+" total"),
         results_frame->Render()|flex,separator(),hbox({previous->Render(),next->Render(),open->Render()})});
@@ -332,10 +328,10 @@ class Application {
   Component root_,chapter_widgets_;
   bool busy_=false,favorites_view_=false;
   int tab_=0,order_=0,page_=1,result_index_=0,folder_index_=0,queue_index_=0;
-  std::string keyword_,id_,username_,password_,user_,destination_,api_url_,image_url_,concurrency_,timeout_,retries_,interval_,proxy_;
+  std::string keyword_,username_,password_,user_,destination_,api_url_,image_url_,concurrency_,timeout_,retries_,interval_,proxy_;
   Id listed_folder_{};
   std::string listed_keyword_,listed_order_="mr";
-  std::string status_="Search by keyword or retrieve a comic ID";
+  std::string status_="Search by keyword or comic ID";
   std::vector<std::string> tab_labels_{"Search","Chapters","Account","Queue","Settings"};
   std::vector<std::string> order_labels_{"Latest","Most clicks","Most favorites"};
   std::vector<std::string> order_keys_{"mr","mv","tf"};

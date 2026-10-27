@@ -19,8 +19,8 @@ mkdir build && cd build
 
 - **Tab / Shift-Tab** move focus, arrow keys navigate, **Enter** activates a button or opens a result, and **Space** toggles chapter checkboxes.
 - Use the top tabs to switch between **Search**, **Chapters**, **Account**, **Queue**, and **Settings**. **Ctrl-Q** or **Quit** cancels work and closes.
-- **Search:** enter a keyword and press Enter or Search. Choose Latest, Most clicks, or Most favorites. Previous/Next browse pages. Get ID opens an ID
-  directly. Results show titles, IDs, and authors.
+- **Search:** enter a keyword or comic ID and press Enter or Search. Choose Latest, Most clicks, or Most favorites. Previous/Next browse pages.
+  Results show titles, IDs, and authors.
 - **Account:** enter credentials to log in; the password field is masked and cleared on submission. Passwords are not saved. A saved cookie session is
   checked at startup; Log out removes it. Favorites on Search loads the list; choose a folder and Load folder to filter it. Open a favorite like any result.
 - **Chapters:** read comic metadata, select individual/multiple/all chapters, edit the destination, and Queue selected chapters.
