@@ -15,7 +15,7 @@ struct Settings {
   std::string api_url = "https://www.cdnhth.net";
   std::string image_url = "https://cdn-msp2.jmapiproxy2.cc";
   fs::path destination;
-  int concurrency = 3;
+  int concurrency = 4;
   int timeout_seconds = 30;
   int retries = 3;
   int request_interval_ms = 250;

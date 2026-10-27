@@ -91,7 +91,7 @@ void unit() {
   require(!verified_page(output,identity),"Corrupt output detected");save_page(output,original,identity);
   fs::remove(output.string()+".json");require(!verified_page(output,identity),"Uncommitted page rejected");
   Settings s;s.destination=scratch.path/"downloads";s.validate();save_settings(scratch.path,s);
-  require(load_settings(scratch.path).concurrency==3,"Configuration roundtrip");
+  require(load_settings(scratch.path).concurrency==4,"Configuration roundtrip");
 #ifndef _WIN32
   struct stat statbuf{};stat((scratch.path/"jmcomic.json").c_str(),&statbuf);require((statbuf.st_mode&077)==0,"Owner only config");
 #endif
