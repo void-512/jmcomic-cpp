@@ -1,11 +1,12 @@
 find_package(Threads REQUIRED)
-find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto SSL)
 
-foreach(dep ftxui json stb curl libwebp zlib-ng)
+foreach(dep ftxui json stb curl libwebp zlib-ng openssl)
   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/${dep}/.git")
     message(FATAL_ERROR "Missing ${dep}: run git submodule update --init --recursive")
   endif()
 endforeach()
+
+include(${CMAKE_CURRENT_LIST_DIR}/OpenSSL.cmake)
 
 # Build dependencies as static libraries, without their development tools.
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -37,6 +38,13 @@ set(CURL_ZSTD OFF CACHE BOOL "" FORCE)
 set(USE_NGHTTP2 OFF CACHE BOOL "" FORCE)
 set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
 set(CURL_ENABLE_EXPORT_TARGET OFF CACHE BOOL "" FORCE)
+# These capabilities belong to the pinned OpenSSL build. Its libraries are built
+# after configuration, so curl cannot link feature probes against them yet.
+set(HAVE_AWSLC OFF)
+set(HAVE_BORINGSSL OFF)
+set(HAVE_LIBRESSL OFF)
+set(HAVE_DES_ECB_ENCRYPT ON)
+set(HAVE_SSL_SET0_WBIO ON)
 add_subdirectory(external/curl EXCLUDE_FROM_ALL)
 
 foreach(tool ANIM_UTILS CWEBP DWEBP GIF2WEBP IMG2WEBP VWEBP WEBPINFO

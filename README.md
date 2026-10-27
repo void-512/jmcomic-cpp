@@ -5,10 +5,10 @@ and download decoded pages as PNG.
 
 ## Build and run
 
-Linux is the validated platform. Requirements: C++23 Compiler, CMake, Git, Ninja/Make, OpenSSL 3 dev, and CA certificate.
+Linux is the validated platform. Requirements: C++23 compiler, CMake, Git, Make, Perl, and CA certificates.
 
 ```sh
-sudo apt install build-essential cmake ninja-build git libssl-dev ca-certificates
+sudo apt install build-essential cmake ninja-build git perl ca-certificates
 git clone https://github.com/void-512/jmcomic-cpp.git
 cd jmcomic-cpp
 git submodule update --init --recursive
@@ -49,6 +49,7 @@ Destination/
 ```text
 CMakeLists.txt           Main executable, compiler settings, and install rule
 cmake/Dependencies.cmake Third-party build configuration
+cmake/OpenSSL.cmake      Static OpenSSL build and CMake package integration
 include/jmcomic/         Application headers
 src/main.cpp            Application entry point
 src/models.cpp          API models and settings validation
@@ -65,8 +66,9 @@ external/               Pinned dependency submodules
 | --- |
 | FTXUI 7.0.3 |
 | nlohmann/json 3.12.0 |
-| stb (JPEG/PNG/GIF decoding) |
+| stb |
 | libwebp 1.6.0 |
 | curl 8.23.0 |
-| zlib-ng 2.3.3 (PNG compression) |
+| zlib-ng 2.3.3 |
+| OpenSSL 3.5.9 |
 
