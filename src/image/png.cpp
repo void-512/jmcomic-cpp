@@ -1,4 +1,5 @@
 #include "jmcomic/image.hpp"
+#include "jmcomic/storage.hpp"
 #include "validation.hpp"
 #include <algorithm>
 #include <array>
@@ -8,6 +9,16 @@
 
 namespace jm {
 namespace {
+constexpr std::array<unsigned char, 8> png_signature{137, 80, 78, 71, 13, 10, 26, 10};
+constexpr std::string_view receipt_prefix{"jmcomic\0", 8};
+constexpr std::size_t max_receipt_size = 4 * 1024 * 1024;
+
+std::uint32_t read_u32(std::span<const unsigned char> bytes, std::size_t offset) {
+  std::uint32_t value{};
+  for (std::size_t i = 0; i < 4; ++i) value = (value << 8) | bytes[offset + i];
+  return value;
+}
+
 void append_u32(Bytes& output, std::uint32_t value) {
   for (int shift = 24; shift >= 0; shift -= 8)
     output.push_back(static_cast<unsigned char>(value >> shift));
@@ -90,7 +101,7 @@ Bytes encode_png(const Image& image) {
   if (image.rgba.size() != stride * height)
     throw std::runtime_error("Invalid PNG image buffer");
 
-  Bytes output{137, 80, 78, 71, 13, 10, 26, 10};
+  Bytes output(png_signature.begin(), png_signature.end());
   Bytes header;
   append_u32(header, static_cast<std::uint32_t>(image.width));
   append_u32(header, static_cast<std::uint32_t>(image.height));
@@ -108,5 +119,60 @@ Bytes encode_png(const Image& image) {
   compressor.write(output, {}, Z_FINISH);
   append_chunk(output, "IEND", {});
   return output;
+}
+
+bool verified_page(const fs::path& output, const Json& identity) {
+  try {
+    auto bytes = read_bytes(output, 128 * 1024 * 1024);
+    if (bytes.size() < 45 || !std::equal(png_signature.begin(), png_signature.end(), bytes.begin()))
+      return false;
+
+    Json record;
+    std::size_t receipt_begin{}, receipt_end{};
+    bool ended = false;
+    for (std::size_t offset = png_signature.size(); offset < bytes.size();) {
+      if (bytes.size() - offset < 12) return false;
+      const auto size = read_u32(bytes, offset);
+      if (size > bytes.size() - offset - 12) return false;
+      const auto end = offset + size + 12;
+      const std::string_view type(reinterpret_cast<const char*>(bytes.data() + offset + 4), 4);
+      if (type == "tEXt" && size >= receipt_prefix.size() &&
+          std::equal(receipt_prefix.begin(), receipt_prefix.end(), bytes.data() + offset + 8)) {
+        if (receipt_begin || size > max_receipt_size + receipt_prefix.size()) return false;
+        const auto crc = zng_crc32_z(0, bytes.data() + offset + 4, static_cast<std::size_t>(size) + 4);
+        if (crc != read_u32(bytes, end - 4)) return false;
+        const auto* text = bytes.data() + offset + 8 + receipt_prefix.size();
+        record = Json::parse(text, text + (size - receipt_prefix.size()));
+        receipt_begin = offset;
+        receipt_end = end;
+      }
+      if (type == "IEND") {
+        ended = size == 0 && end == bytes.size();
+        break;
+      }
+      offset = end;
+    }
+    if (!ended || !receipt_begin || record.value("version", 0) != 1 || record.at("identity") != identity)
+      return false;
+
+    // Hash the original PNG, excluding the embedded receipt that stores its digest.
+    bytes.erase(bytes.begin() + static_cast<Bytes::difference_type>(receipt_begin),
+                bytes.begin() + static_cast<Bytes::difference_type>(receipt_end));
+    return sha256(bytes) == record.at("sha256").get<std::string>();
+  } catch (...) { return false; }
+}
+
+void save_page(const fs::path& path, const Image& image, const Json& identity) {
+  auto bytes = encode_png(image);
+  const Json record{{"version", 1}, {"identity", identity}, {"sha256", sha256(bytes)},
+                    {"width", image.width}, {"height", image.height}};
+  std::string text(receipt_prefix);
+  text += record.dump(-1, ' ', true); // PNG tEXt is Latin-1; escape Unicode as ASCII.
+  if (text.size() > max_receipt_size + receipt_prefix.size())
+    throw std::runtime_error("PNG resume metadata exceeds size limit");
+  bytes.resize(bytes.size() - 12); // Insert the receipt before IEND.
+  append_chunk(bytes, "tEXt", {reinterpret_cast<const unsigned char*>(text.data()), text.size()});
+  append_chunk(bytes, "IEND", {});
+  atomic_write(path, bytes);
 }
 }

@@ -37,11 +37,8 @@ Defaults are 4 download workers, a 30-second request timeout, 3 retries, and at 
 Destination/
   Comic title [comic ID]/
     Chapter name [chapter ID]/
-      chapter.json
       001.png
-      001.png.json
       002.png
-      002.png.json
 ```
 
 ## Project structure and dependencies

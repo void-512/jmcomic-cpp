@@ -1,6 +1,5 @@
 #include "jmcomic/downloader.hpp"
 #include "jmcomic/image.hpp"
-#include "jmcomic/storage.hpp"
 #include <algorithm>
 namespace jm {
 struct DownloadManager::Task {
@@ -124,8 +123,6 @@ void DownloadManager::discover(const std::shared_ptr<Task>& t) {
     auto data=t->client->chapter(t->chapter.id,t->cancel.get_token());
     if (t->cancel.stop_requested()) throw Cancelled();
     fs::create_directories(t->directory);
-    atomic_json(t->directory/"chapter.json",{{"comic_id",t->comic.id},{"comic",t->comic.name},{"chapter_id",t->chapter.id},
-      {"chapter",t->chapter.name},{"images",data.images},{"scramble_id",data.scramble_id}});
     {
       std::lock_guard lock(mutex_);
       t->data=std::move(data); t->progress.total=t->data.images.size(); t->progress.state=TaskState::Downloading;

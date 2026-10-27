@@ -1,5 +1,4 @@
 #include "jmcomic/image.hpp"
-#include "jmcomic/storage.hpp"
 #include "validation.hpp"
 #include <algorithm>
 #include <cstring>
@@ -65,21 +64,5 @@ void unscramble(Image& image, unsigned count) {
     std::copy_n(image.rgba.data()+source*stride,lines*stride,output.data()+dest*stride);
   }
   image.rgba=std::move(output);
-}
-bool verified_page(const fs::path& output, const Json& identity) {
-  try {
-    const auto record=read_json(output.string()+".json");
-    if (record.at("identity")!=identity || record.value("version",0)!=1) return false;
-    const auto bytes=read_bytes(output,128*1024*1024);
-    if (sha256(bytes)!=record.at("sha256").get<std::string>()) return false;
-    // The digest authenticates an output previously produced by our PNG encoder.
-    return bytes.size()>32 && std::memcmp(bytes.data(),"\x89PNG\r\n\x1a\n",8)==0;
-  } catch (...) { return false; }
-}
-void save_page(const fs::path& path, const Image& image, const Json& identity) {
-  auto bytes=encode_png(image);
-  auto record=Json{{"version",1},{"identity",identity},{"sha256",sha256(bytes)},{"width",image.width},{"height",image.height}};
-  atomic_write(path,bytes);
-  atomic_json(path.string()+".json",record);
 }
 }
