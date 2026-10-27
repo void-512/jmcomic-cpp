@@ -13,3 +13,7 @@
 [submodule "external/curl"]
 	path = external/curl
 	url = https://github.com/curl/curl.git
+[submodule "external/zlib-ng"]
+	path = external/zlib-ng
+	url = https://github.com/zlib-ng/zlib-ng.git
+	branch = stable
