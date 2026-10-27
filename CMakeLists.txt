@@ -12,6 +12,7 @@ add_executable(jmcomic
   src/auth/crypto.cpp
   src/downloader/manager.cpp
   src/image/image.cpp
+  src/image/png.cpp
   src/tui/app.cpp
 )
 target_compile_features(jmcomic PRIVATE cxx_std_23)
@@ -23,6 +24,7 @@ target_link_libraries(jmcomic PRIVATE
   OpenSSL::Crypto
   CURL::libcurl_static
   webpdemux
+  zlib-ng::zlibstatic
   ftxui::component
 )
 

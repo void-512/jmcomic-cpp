@@ -59,14 +59,14 @@ src/downloader/         Download queue and workers
 src/image/              Image decoding and PNG output
 src/tui/                Terminal interface
 external/               Pinned dependency submodules
-THIRD_PARTY_NOTICES.md   Attribution and licenses
 ```
 
 | Dependency |
 | --- |
 | FTXUI 7.0.3 |
 | nlohmann/json 3.12.0 |
-| stb |
+| stb (JPEG/PNG/GIF decoding) |
 | libwebp 1.6.0 |
 | curl 8.23.0 |
+| zlib-ng 2.3.3 (PNG compression) |
 

@@ -1,7 +1,7 @@
 find_package(Threads REQUIRED)
 find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto SSL)
 
-foreach(dep ftxui json stb curl libwebp)
+foreach(dep ftxui json stb curl libwebp zlib-ng)
   if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/external/${dep}/.git")
     message(FATAL_ERROR "Missing ${dep}: run git submodule update --init --recursive")
   endif()
@@ -44,3 +44,13 @@ foreach(tool ANIM_UTILS CWEBP DWEBP GIF2WEBP IMG2WEBP VWEBP WEBPINFO
   set(WEBP_BUILD_${tool} OFF CACHE BOOL "" FORCE)
 endforeach()
 add_subdirectory(external/libwebp EXCLUDE_FROM_ALL)
+
+set(ZLIB_COMPAT OFF CACHE BOOL "" FORCE)
+set(ZLIB_ALIASES OFF CACHE BOOL "" FORCE)
+set(WITH_GZFILEOP OFF CACHE BOOL "" FORCE)
+set(WITH_GTEST OFF CACHE BOOL "" FORCE)
+set(WITH_FUZZERS OFF CACHE BOOL "" FORCE)
+set(WITH_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(WITH_BENCHMARK_APPS OFF CACHE BOOL "" FORCE)
+set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
+add_subdirectory(external/zlib-ng EXCLUDE_FROM_ALL)
