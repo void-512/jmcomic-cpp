@@ -6,11 +6,10 @@
 #include <regex>
 #include <sstream>
 namespace jm {
-void Settings::validate(bool allow_loopback) const {
+void Settings::validate() const {
   const std::regex https(R"(^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?$)");
-  const std::regex local(R"(^http://127\.0\.0\.1:[0-9]{1,5}$)");
   for (const auto* url : {&api_url, &image_url})
-    if (!std::regex_match(*url, https) && !(allow_loopback && std::regex_match(*url, local)))
+    if (!std::regex_match(*url, https))
       throw std::runtime_error("API and image URLs must be HTTPS origins (no path, credentials, or trailing slash)");
   if (concurrency < 1 || concurrency > 8 || retries < 0 || retries > 5 || timeout_seconds < 5 ||
       timeout_seconds > 180 || request_interval_ms < 100 || request_interval_ms > 10000)

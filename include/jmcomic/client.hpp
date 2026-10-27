@@ -3,7 +3,7 @@
 namespace jm {
 class Client {
  public:
-  Client(Settings settings, fs::path directory, bool allow_loopback = false);
+  Client(Settings settings, fs::path directory);
   Listing search(const std::string&, int page, const std::string& sort, std::stop_token = {});
   Comic comic(Id, std::stop_token = {});
   Chapter chapter(Id, std::stop_token = {});

@@ -12,9 +12,9 @@ std::string params_string(const std::vector<std::pair<std::string,std::string>>&
 }
 bool retry_request(const HttpError& e, int attempt, int retries) { return e.transient && attempt<retries && e.retry_after<=60; }
 }
-Client::Client(Settings settings, fs::path directory, bool allow_loopback)
+Client::Client(Settings settings, fs::path directory)
   : http_(settings), session_file_(std::move(directory)/"jmcomic-session.json") {
-  settings.validate(allow_loopback);
+  settings.validate();
   if (fs::exists(session_file_)) {
     const auto j=read_json(session_file_);
     if (j.value("origin",std::string{}) == settings.api_url) cookies_=j.at("cookies").get<std::vector<std::string>>();

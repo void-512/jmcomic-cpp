@@ -20,7 +20,7 @@ struct Settings {
   int retries = 3;
   int request_interval_ms = 250;
   std::string proxy; // Empty explicitly disables environment proxy settings.
-  void validate(bool allow_loopback = false) const;
+  void validate() const;
 };
 struct ChapterInfo { Id id{}; std::string name; int order{}; };
 struct Comic {

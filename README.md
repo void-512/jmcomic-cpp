@@ -2,50 +2,41 @@
 
 A C++23 application with an FTXUI terminal interface. Search by keyword or comic
 ID, browse account favorites and folders, choose chapters and a destination,
-and download decoded pages as PNG. The adjacent `jmcomic-downloader` reference
-project is unchanged.
+and download decoded pages as PNG.
 
 ## Build and run
 
 Linux is the validated platform. Requirements: GCC 13+ or Clang with C++23,
-CMake 3.25+, Git, Ninja (or Make), OpenSSL 3 development headers, and a system CA
-certificate bundle. Python 3 and the `openssl` command are needed only for the
-local integration test.
+CMake 3.25+, Git, Ninja/Make, OpenSSL 3 development headers, and a system CA
+certificate bundle.
 
 On Debian / Raspberry Pi OS:
 
 ```sh
-sudo apt-get install build-essential cmake ninja-build git libssl-dev ca-certificates python3 openssl
-```
-
-After cloning this repository, initialize the pinned dependencies:
-
-```sh
+sudo apt install build-essential cmake ninja-build git libssl-dev ca-certificates
+git clone https://github.com/void-512/jmcomic-cpp.git
+cd jmcomic-cpp
 git submodule update --init --recursive
 ```
 
-Or clone a published copy with `git clone --recurse-submodules <repository-url>`.
-FTXUI, JSON, stb, libwebp, and curl are Git submodules; CMake does not download
-additional sources. OpenSSL and platform libraries are discovered by CMake.
-
-The following keeps disposable build files in RAM-backed cache, while installing
-the executable into this repository's `bin/` directory:
+Build in RAM-backed temporary storage and install the executable into `bin/`:
 
 ```sh
 mkdir -p "$HOME/.cache/codex-tmp"
 jm_build="$HOME/.cache/codex-tmp/jmcomic-build"
 TMPDIR="$HOME/.cache/codex-tmp" cmake -S . -B "$jm_build" -G Ninja -DCMAKE_BUILD_TYPE=Release
-TMPDIR="$HOME/.cache/codex-tmp" cmake --build "$jm_build" -j 3
-TMPDIR="$HOME/.cache/codex-tmp" ctest --test-dir "$jm_build" --output-on-failure
+TMPDIR="$HOME/.cache/codex-tmp" cmake --build "$jm_build" --target jmcomic -j 3
 cmake --install "$jm_build" --prefix "$PWD"
 ./bin/jmcomic
 ```
 
+`jmcomic` is the only application build target. Its third-party libraries build
+automatically as dependencies. CMake also provides its standard build and install
+utility targets. The executable's only command-line option is `--help`.
+
 Use a writable installation directory. `jmcomic.json`, `jmcomic-session.json`,
-and the default `Downloads/` directory live **beside the executable**, independent
-of the current directory. An explicit destination may point anywhere writable.
-A normal build directory also works on machines without RAM-backed cache.
-`--help` is the application's only command-line option.
+and the default `Downloads/` directory live beside the executable. Settings and
+downloads persist independently of the disposable build directory.
 
 ## Controls and workflow
 
@@ -71,14 +62,8 @@ A normal build directory also works on machines without RAM-backed cache.
   after active downloads stop. Retries use the current applied network settings.
   Empty proxy means a direct connection; no proxy environment setup is needed.
 
-Default limits are 3 parallel workers, a 30-second request timeout, 3 retries,
-and at least 250 ms between requests. HTTP 429/Retry-After pauses all new
-requests on that client; waits over 60 seconds are reported for manual retry.
-TLS certificate and hostname verification stay enabled. Redirects are reported
-so the user can update the origin; authentication headers are never forwarded
-to another host. Service challenges are reported without attempting to bypass
-them. Hosts can change: the working API origin checked on 2026-10-26 was
-`https://www.cdnhth.net`; the reference's `www.cdnhth.cc` served a parked page.
+Defaults are 4 download workers, a 30-second request timeout, 3 retries, and
+at least 250 ms between requests. Saved settings override these defaults.
 
 ## Output, correctness, and resource use
 
@@ -117,7 +102,23 @@ permissions and overwrite semantics are not validated; Linux is recommended.
 Run one application instance per output directory. The queue itself is held in
 memory; page receipts provide restart/resume support.
 
-## Architecture and dependencies
+## Project structure and dependencies
+
+```text
+CMakeLists.txt           Main executable, compiler settings, and install rule
+cmake/Dependencies.cmake Third-party build configuration
+include/jmcomic/         Application headers
+src/main.cpp            Application entry point
+src/models.cpp          API models and settings validation
+src/storage.cpp         Configuration and atomic file writes
+src/api/                API client and HTTP transport
+src/auth/               Cryptographic helpers
+src/downloader/         Download queue and workers
+src/image/              Image decoding and PNG output
+src/tui/                Terminal interface
+external/               Pinned dependency submodules
+THIRD_PARTY_NOTICES.md   Attribution and licenses
+```
 
 `src/api` contains HTTP transport, rate limiting, protocol signatures, response
 decryption, and API model conversion. `src/auth` contains cryptographic helpers;
@@ -129,58 +130,12 @@ one background command worker sends completion callbacks through a mutex queue
 and FTXUI custom events; download workers publish snapshots. Network, decoding,
 and output writes run outside the terminal event loop.
 
-| Dependency | Pin |
-| --- | --- |
-| FTXUI 7.0.3 | `f921fad208912747c17d129a8ef75ec7624b6eec` |
-| nlohmann/json 3.12.0 | `55f93686c01528224f448c19128836e7df245f72` |
-| stb | `003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5` |
-| libwebp 1.6.0 | `4fa21912338357f89e4fd51cf2368325b59e9bd9` |
-| curl 8.23.0 | `3163ec065643ba20709f190111f42c3e1fe95273` |
+| Dependency |
+| --- |
+| FTXUI 7.0.3 |
+| nlohmann/json 3.12.0 |
+| stb |
+| libwebp 1.6.0 |
+| curl 8.23.0 |
 
 See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for attribution and licenses.
-
-## Validation and allocator decision
-
-The CTest core suite covers crypto primitives, invalid ciphertext, numeric IDs,
-filename handling, strip thresholds and remainder rows, WebP/JPEG/GIF decoding,
-PNG pixel round trips, receipts, corruption detection, and configuration.
-The local HTTP fixture verifies the real signing/encryption protocol, search
-ordering and pagination, comic/chapters, login failure and cookie persistence,
-favorites/folders, expired sessions, HTTP 429, corrupt image retries, progress,
-cancellation, failed pages, and resume. It does not need a JMComic account. A pseudo-terminal smoke test
-checks all five tabs, terminal resizing, and graceful quit.
-
-Optional developer checks (these are test-binary options, not application CLI):
-
-```sh
-TMPDIR="$HOME/.cache/codex-tmp" "$jm_build/jmcomic_tests" --live
-TMPDIR="$HOME/.cache/codex-tmp" "$jm_build/jmcomic_tests" --benchmark
-```
-
-The live check uses the configured default public hosts, requests all three
-search orderings, loads a real comic and chapter, decodes and converts a page,
-downloads the complete first chapter, and verifies restart/resume. Its scratch
-data is deleted afterward. Live login and favorites require a usable account
-and are **unverified against the service**; only the local fixture verifies them.
-
-Mimalloc is not included. HTTP/JSON uses small allocations, but image processing
-mostly uses a few large worker-owned buffers. Network latency and PNG encoding
-are credible bottlenecks; no measured allocator contention currently justifies
-another dependency or a global allocator override. The benchmark reports decode,
-strip-copy, and PNG encoding times with three workers. It is a synthetic image
-pipeline measurement, not a mimalloc A/B test. Reconsider an optional allocator
-only if representative profiling demonstrates allocation/lock overhead.
-
-On this aarch64 host (GCC 14.2, Release), six synthetic 1200×1800 pages with
-three workers took 909 ms for the measured pipeline. Summed worker phase times
-were 370 ms decoding, 64 ms strip copying, and 2286 ms PNG encoding (84% of
-measured processing time); process peak RSS was 120544 KiB. This supports
-prioritizing encoding and memory limits over changing the allocator. It does
-not establish how much mimalloc would improve a different workload.
-
-Validation on 2026-10-26: Release build and focused tests passed. The compiled
-client returned 47 results for each search order, fetched comic/chapter 1480638,
-converted a 1079×1500 WebP with 12 strips, downloaded all 22 chapter pages as
-PNGs, and reused all 22 verified outputs in a new download manager. The single
-page PNG decoded back to identical RGBA pixels. Live account workflows remain
-unverified because no usable credentials were supplied.

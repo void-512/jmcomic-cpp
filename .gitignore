@@ -1,8 +1,7 @@
 /build*/
-/.scratch/
 *.part
 jmcomic.json
 jmcomic-session.json
 Downloads/
-__pycache__/
 /bin/
+.codegraph/
