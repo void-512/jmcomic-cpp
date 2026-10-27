@@ -89,14 +89,17 @@ Settings load_settings(const fs::path& directory) {
   const auto j=read_json(path);
   s.api_url = j.value("api_url", s.api_url); s.image_url = j.value("image_url", s.image_url);
   s.destination = j.value("destination", s.destination.string());
-  s.concurrency = j.value("concurrency", s.concurrency); s.timeout_seconds = j.value("timeout_seconds", s.timeout_seconds);
+  s.download_concurrency = j.value("download_concurrency", s.download_concurrency);
+  s.processing_concurrency = j.value("processing_concurrency", s.processing_concurrency);
+  s.timeout_seconds = j.value("timeout_seconds", s.timeout_seconds);
   s.retries = j.value("retries", s.retries); s.request_interval_ms = j.value("request_interval_ms", s.request_interval_ms);
   s.proxy = j.value("proxy", s.proxy); s.validate(); return s;
 }
 void save_settings(const fs::path& directory, const Settings& s) {
   s.validate();
   atomic_json(directory / "jmcomic.json", {{"api_url",s.api_url},{"image_url",s.image_url},{"destination",fs::absolute(s.destination).string()},
-    {"concurrency",s.concurrency},{"timeout_seconds",s.timeout_seconds},{"retries",s.retries},
+    {"download_concurrency",s.download_concurrency},{"processing_concurrency",s.processing_concurrency},
+    {"timeout_seconds",s.timeout_seconds},{"retries",s.retries},
     {"request_interval_ms",s.request_interval_ms},{"proxy",s.proxy}}, true);
 }
 }

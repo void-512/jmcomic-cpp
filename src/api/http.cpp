@@ -73,7 +73,7 @@ HttpResponse Http::perform(const HttpRequest& req, std::stop_token stop) {
       if (remaining>std::chrono::seconds(60))
         throw HttpError("Service rate limit is still active; retry later",429,static_cast<int>(remaining.count())+1,false);
       auto* next=&next_request_;
-      if (req.image) next=&*std::min_element(next_image_requests_.begin(),next_image_requests_.begin()+settings_.concurrency);
+      if (req.image) next=&*std::min_element(next_image_requests_.begin(),next_image_requests_.begin()+settings_.download_concurrency);
       const auto at=std::max(*next,cooldown_);
       if (now>=at) {
         *next=now+std::chrono::milliseconds(settings_.request_interval_ms);

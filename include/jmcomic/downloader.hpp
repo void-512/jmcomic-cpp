@@ -32,7 +32,7 @@ class DownloadManager {
  private:
   struct Task;
   struct Job;
-  void ensure_workers(int concurrency);
+  void ensure_workers(const Settings&);
   void resume_task(std::shared_ptr<Task>&, const std::shared_ptr<Client>&);
   bool cancel_task(const std::shared_ptr<Task>&);
   void remove_cancelled(const std::shared_ptr<Task>&);

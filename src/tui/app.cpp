@@ -56,7 +56,8 @@ class Application {
     : directory_(std::move(dir)), settings_(std::move(settings)), client_(std::make_shared<Client>(settings_,directory_)),
       downloads_([this]{ screen_.PostEvent(Event::Custom); }) {
     destination_=settings_.destination.string(); api_url_=settings_.api_url; image_url_=settings_.image_url;
-    concurrency_=std::to_string(settings_.concurrency); timeout_=std::to_string(settings_.timeout_seconds);
+    download_concurrency_=std::to_string(settings_.download_concurrency); processing_concurrency_=std::to_string(settings_.processing_concurrency);
+    timeout_=std::to_string(settings_.timeout_seconds);
     retries_=std::to_string(settings_.retries); interval_=std::to_string(settings_.request_interval_ms); proxy_=settings_.proxy;
   }
   ~Application() { background_.cancel(); downloads_.shutdown(); background_.stop(); }
@@ -190,7 +191,8 @@ class Application {
     Settings s;
     try {
       s.api_url=api_url_; s.image_url=image_url_; s.destination=destination_; s.proxy=proxy_;
-      s.concurrency=integer(concurrency_); s.timeout_seconds=integer(timeout_); s.retries=integer(retries_); s.request_interval_ms=integer(interval_); s.validate();
+      s.download_concurrency=integer(download_concurrency_); s.processing_concurrency=integer(processing_concurrency_);
+      s.timeout_seconds=integer(timeout_); s.retries=integer(retries_); s.request_interval_ms=integer(interval_); s.validate();
     } catch (const std::exception& e) { status_=e.what(); return; }
     work("Saving settings",[this,s](std::stop_token) {
       auto client=std::make_shared<Client>(s,directory_); save_settings(directory_,s);
@@ -290,15 +292,18 @@ class Application {
       content.push_back(separator());content.push_back(pause_resume->Render());content.push_back(cancellations->Render());return vbox(std::move(content));
     });
     auto api=Input(&api_url_,"HTTPS API origin"); auto images=Input(&image_url_,"HTTPS image origin");
-    auto workers=Input(&concurrency_,"1–64"); auto timeout=Input(&timeout_,"5–180 seconds");
+    auto download_workers=Input(&download_concurrency_,"1–64"); auto processing_workers=Input(&processing_concurrency_,"1–64");
+    auto timeout=Input(&timeout_,"5–180 seconds");
     auto retries=Input(&retries_,"0–5"); auto interval=Input(&interval_,"0–10000 milliseconds");
     auto proxy=Input(&proxy_,"Empty = direct connection",password_option);
     auto settings_destination=Input(&destination_,"Destination directory");
     auto save=Button("Apply and save",[this]{apply_settings();});
-    auto settings_controls=Container::Vertical({api,images,settings_destination,workers,timeout,retries,interval,proxy,save});
+    auto settings_controls=Container::Vertical({api,images,settings_destination,download_workers,processing_workers,timeout,retries,interval,proxy,save});
     auto settings=Renderer(settings_controls,[=] {
       return vbox({text("API origin"),api->Render(),text("Image origin"),images->Render(),text("Download destination"),settings_destination->Render(),
-        hbox({text("Parallel workers (1–64): "),workers->Render()|flex}),hbox({text("Request timeout in seconds: "),timeout->Render()|flex}),
+        hbox({text("Download concurrency (1–64): "),download_workers->Render()|flex}),
+        hbox({text("Processing concurrency (1–64): "),processing_workers->Render()|flex}),
+        hbox({text("Request timeout in seconds: "),timeout->Render()|flex}),
         hbox({text("Retries: "),retries->Render()|flex}),hbox({text("Request spacing per download slot, ms: "),interval->Render()|flex}),
         text("Proxy URL (optional; hidden)"),proxy->Render(),save->Render(),filler(),
         paragraph("Apply network settings after active downloads stop. Destination changes apply when queueing chapters. Settings and session files live beside the executable.")})|vscroll_indicator|frame;
@@ -328,7 +333,7 @@ class Application {
   Component root_,chapter_widgets_;
   bool busy_=false,favorites_view_=false;
   int tab_=0,order_=0,page_=1,result_index_=0,folder_index_=0,queue_index_=0;
-  std::string keyword_,username_,password_,user_,destination_,api_url_,image_url_,concurrency_,timeout_,retries_,interval_,proxy_;
+  std::string keyword_,username_,password_,user_,destination_,api_url_,image_url_,download_concurrency_,processing_concurrency_,timeout_,retries_,interval_,proxy_;
   Id listed_folder_{};
   std::string listed_keyword_,listed_order_="mr";
   std::string status_="Search by keyword or comic ID";
