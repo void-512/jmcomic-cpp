@@ -290,15 +290,15 @@ class Application {
       content.push_back(separator());content.push_back(pause_resume->Render());content.push_back(cancellations->Render());return vbox(std::move(content));
     });
     auto api=Input(&api_url_,"HTTPS API origin"); auto images=Input(&image_url_,"HTTPS image origin");
-    auto workers=Input(&concurrency_,"1–8"); auto timeout=Input(&timeout_,"5–180 seconds");
-    auto retries=Input(&retries_,"0–5"); auto interval=Input(&interval_,"100–10000 milliseconds");
+    auto workers=Input(&concurrency_,"1–64"); auto timeout=Input(&timeout_,"5–180 seconds");
+    auto retries=Input(&retries_,"0–5"); auto interval=Input(&interval_,"0–10000 milliseconds");
     auto proxy=Input(&proxy_,"Empty = direct connection",password_option);
     auto settings_destination=Input(&destination_,"Destination directory");
     auto save=Button("Apply and save",[this]{apply_settings();});
     auto settings_controls=Container::Vertical({api,images,settings_destination,workers,timeout,retries,interval,proxy,save});
     auto settings=Renderer(settings_controls,[=] {
       return vbox({text("API origin"),api->Render(),text("Image origin"),images->Render(),text("Download destination"),settings_destination->Render(),
-        hbox({text("Parallel workers (1–8): "),workers->Render()|flex}),hbox({text("Request timeout in seconds: "),timeout->Render()|flex}),
+        hbox({text("Parallel workers (1–64): "),workers->Render()|flex}),hbox({text("Request timeout in seconds: "),timeout->Render()|flex}),
         hbox({text("Retries: "),retries->Render()|flex}),hbox({text("Request spacing per download slot, ms: "),interval->Render()|flex}),
         text("Proxy URL (optional; hidden)"),proxy->Render(),save->Render(),filler(),
         paragraph("Apply network settings after active downloads stop. Destination changes apply when queueing chapters. Settings and session files live beside the executable.")})|vscroll_indicator|frame;

@@ -34,7 +34,7 @@ class Http {
   std::mutex rate_mutex_;
   std::condition_variable_any rate_ready_;
   std::chrono::steady_clock::time_point next_request_{};
-  std::array<std::chrono::steady_clock::time_point,8> next_image_requests_{};
+  std::array<std::chrono::steady_clock::time_point,Settings::max_concurrency> next_image_requests_{};
   std::chrono::steady_clock::time_point cooldown_{};
 };
 }

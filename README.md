@@ -28,10 +28,10 @@ mkdir build && cd build
   ones. Cancel selected / Cancel all remove tasks from the queue and delete their chapter folders after active downloads stop. If deletion fails, the task
   shows the error; cancel it again to retry. Completed tasks show a green ✓ Finished label
   on the right. After restarting, find the comic and queue the same chapters and destination to resume them.
-- **Settings:** edit concurrency (1–8), timeout, retry count, request spacing per download slot, API and image origins, optional HTTP(S)/SOCKS proxy, and destination. Apply
+- **Settings:** edit concurrency, timeout, retry count, request spacing per download slot, API and image origins, optional HTTP(S)/SOCKS proxy, and destination. Apply
   after active downloads stop. Retries use the current applied network settings. Empty proxy means a direct connection; no proxy environment setup is needed.
 
-Defaults are 4 concurrent downloads, a 30-second request timeout, 3 retries, and at least 250 ms between requests per download slot; server cooldowns apply to both API and image requests. Downloading overlaps image processing through a bounded queue, with processing workers
+Defaults are 4 concurrent downloads, a 30-second request timeout, 3 retries, and 100 ms between requests per download slot; server cooldowns apply to both API and image requests.
 limited by concurrency and available CPU cores. Saved settings override these defaults.
 
 ## Output, correctness, and resource use

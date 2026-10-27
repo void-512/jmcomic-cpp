@@ -11,9 +11,9 @@ void Settings::validate() const {
   for (const auto* url : {&api_url, &image_url})
     if (!std::regex_match(*url, https))
       throw std::runtime_error("API and image URLs must be HTTPS origins (no path, credentials, or trailing slash)");
-  if (concurrency < 1 || concurrency > 8 || retries < 0 || retries > 5 || timeout_seconds < 5 ||
-      timeout_seconds > 180 || request_interval_ms < 100 || request_interval_ms > 10000)
-    throw std::runtime_error("Settings: workers 1–8, retries 0–5, timeout 5–180s, interval 100–10000ms");
+  if (concurrency < 1 || concurrency > max_concurrency || retries < 0 || retries > 5 || timeout_seconds < 5 ||
+      timeout_seconds > 180 || request_interval_ms < 0 || request_interval_ms > 10000)
+    throw std::runtime_error("Settings: workers 1–64, retries 0–5, timeout 5–180s, interval 0–10000ms");
   if (destination.empty()) throw std::runtime_error("Choose a download destination");
   if (!proxy.empty() && !std::regex_match(proxy, std::regex(R"(^(https?|socks5h?)://[^\s]+$)")))
     throw std::runtime_error("Proxy must use http://, https://, socks5:// or socks5h://");

@@ -36,10 +36,17 @@ std::string state_name(TaskState s) {
   }
   return {};
 }
-DownloadManager::DownloadManager(Notify notify) : notify_(std::move(notify)) {
-  for (int i=0;i<8;++i) workers_.emplace_back([this,i](std::stop_token stop){run(stop,i,false);});
-  const auto count=std::clamp(std::thread::hardware_concurrency(),1U,8U);
-  for (unsigned i=0;i<count;++i) processors_.emplace_back([this,i](std::stop_token stop){run(stop,static_cast<int>(i),true);});
+DownloadManager::DownloadManager(Notify notify) : notify_(std::move(notify)) {}
+void DownloadManager::ensure_workers(int concurrency) {
+  while (workers_.size()<static_cast<std::size_t>(concurrency)) {
+    const auto i=static_cast<int>(workers_.size());
+    workers_.emplace_back([this,i](std::stop_token stop){run(stop,i,false);});
+  }
+  const auto count=std::min(static_cast<unsigned>(concurrency),std::max(1U,std::thread::hardware_concurrency()));
+  while (processors_.size()<count) {
+    const auto i=static_cast<int>(processors_.size());
+    processors_.emplace_back([this,i](std::stop_token stop){run(stop,i,true);});
+  }
 }
 DownloadManager::~DownloadManager() { shutdown(); }
 void DownloadManager::changed() { if (notify_) notify_(); }
@@ -59,6 +66,7 @@ std::uint64_t DownloadManager::enqueue(std::shared_ptr<Client> client, const Com
         throw std::runtime_error("This chapter is already in the queue; select Resume selected there");
       return t->progress.task;
     }
+    ensure_workers(client->settings().concurrency);
     auto t=std::make_shared<Task>(); id=next_task_++;
     t->progress.task=id; t->progress.comic=comic.name; t->progress.chapter=chapter.name; t->progress.chapter_id=chapter.id;
     t->client=std::move(client); t->comic=comic; t->chapter=chapter; t->directory=directory;
@@ -113,6 +121,7 @@ void DownloadManager::resume_task(std::shared_ptr<Task>& t, const std::shared_pt
     replacement->progress.task=t->progress.task; replacement->progress.comic=t->comic.name;
     replacement->progress.chapter=t->chapter.name; replacement->progress.chapter_id=t->chapter.id;
     replacement->client=client ? client : t->client; replacement->comic=t->comic; replacement->chapter=t->chapter;
+    ensure_workers(replacement->client->settings().concurrency);
     replacement->directory=t->directory; t=replacement;
     jobs_.push_back({t,0,true});
   } else if (t->paused && t->progress.state!=TaskState::Completed && t->progress.state!=TaskState::Cancelled) {
@@ -120,6 +129,7 @@ void DownloadManager::resume_task(std::shared_ptr<Task>& t, const std::shared_pt
       if (t->active) throw std::runtime_error("Wait for this task to finish pausing before changing its network settings");
       t->client=client;
     }
+    ensure_workers(t->client->settings().concurrency);
     t->paused=false;
   }
 }

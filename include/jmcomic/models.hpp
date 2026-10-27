@@ -12,13 +12,14 @@ using Id = std::int64_t;
 struct Cancelled : std::runtime_error { Cancelled() : runtime_error("Cancelled") {} };
 struct AuthError : std::runtime_error { using runtime_error::runtime_error; };
 struct Settings {
+  static constexpr int max_concurrency = 64;
   std::string api_url = "https://www.cdnhth.net";
   std::string image_url = "https://cdn-msp2.jmapiproxy2.cc";
   fs::path destination;
   int concurrency = 4;
   int timeout_seconds = 30;
   int retries = 3;
-  int request_interval_ms = 250;
+  int request_interval_ms = 100;
   std::string proxy; // Empty explicitly disables environment proxy settings.
   void validate() const;
 };
